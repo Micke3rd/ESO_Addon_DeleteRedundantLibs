@@ -118,8 +118,8 @@ public class Program
     public static DirectoryInfo GetAddonPath()
     {
         var addons = "AddOns".ToLower();
-        //var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
-        var dir = new DirectoryInfo(@"C:\Users\Test\Documents\Elder Scrolls Online\live\AddOns\DeleteRedundantLibs");
+        var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+        //var dir = new DirectoryInfo(@"C:\Users\Test\Documents\Elder Scrolls Online\live\AddOns\DeleteRedundantLibs");
         try
         {
             if (dir.Name.ToLower().Equals(addons))
