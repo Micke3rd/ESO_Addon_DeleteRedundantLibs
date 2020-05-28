@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Data;
 using System.IO;
 using System.Linq;
 
@@ -19,7 +18,7 @@ public class Program
         }
         finally
         {
-            Console.Write(System.Environment.NewLine + "Press Key to exit ...");
+            Console.Write(System.Environment.NewLine + "Press key to exit ...");
             Console.ReadKey();
         }
     }
