@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 
@@ -33,11 +34,22 @@ public class Program
             return;
         }
 
-        Console.WriteLine("Found these redundant libs:");
-        foreach (var e in folders)
-            Console.WriteLine(e.FullName);
+        var root = GetAddonPath();
+        if (folders.ContainsKey(root))
+        {
+            Console.WriteLine("Found these libs in subfolders, which are not also stored in the addon root folder (" + root.FullName  + "), and therefore ignored:");
+            foreach (var e in folders[root].OrderBy(e => e.Name))
+                Console.WriteLine(e.FullName);
+            Console.WriteLine();
+        }
+        folders.Remove(root);
 
-        Console.Write("Delete (Y/N): ");
+        Console.WriteLine("Found these redundant libs:");
+        foreach (var addon in folders.Keys)
+            foreach (var e in folders[addon])
+                Console.WriteLine(e.FullName);
+
+        Console.Write("Delete them and add as dependency? (Y/N): ");
         var key = Console.ReadKey().KeyChar;
         var answer = Convert.ToString(key).ToUpper();
         if (!"Y".Equals(answer))
@@ -47,14 +59,23 @@ public class Program
         foreach (var e in folders)
         {
             Console.WriteLine();
-            ModifyAddon(e);
+            try
+            {
+                ModifyAddon(e.Key, e.Value);
+            }
+            catch (Exception ex)
+            {
+                Console.Write("Error cleaning folder: " + e.Key.FullName);
+                Console.WriteLine(ex.Message);
+            }
         }
     }
 
-    public static void ModifyAddon(DirectoryInfo dir)
+    public static void ModifyAddon(DirectoryInfo addon, List<DirectoryInfo> libs)
     {
-        var root = dir.Parent.Parent;
-        var txt = root.GetFiles(root.Name + ".txt");
+        //var root = dir.Parent.Parent;
+        var manifest = addon.Name + ".txt";
+        var txt = addon.GetFiles(manifest);
 
         if (txt.Count() > 0)
         {
@@ -62,80 +83,128 @@ public class Program
             var source = File.ReadAllLines(target).ToList();
             var alreadyLinked = new HashSet<string>();
             var s1 = "## DependsOn:"; var s2 = "## OptionalDependsOn:";
-            int? idxOptionalDependsOn = null;
+            int? idxDependsOn = null;
 
             foreach (var row in source)
-            {
-                if (!row.Contains(s1) && !row.Contains(s2))
-                    continue;
-                if (row.Contains(s2))
-                    idxOptionalDependsOn = source.IndexOf(row);
-                foreach (var e3 in row.Split(new[] { s1, s2, " " }, StringSplitOptions.RemoveEmptyEntries))
-                    alreadyLinked.Add(e3);
-            }
-            if (!alreadyLinked.Contains(dir.Name))
-            {
-                if (idxOptionalDependsOn == null)
+                if (row.Contains(s1))
                 {
-                    source.Insert(0, s2);
-                    idxOptionalDependsOn = 0;
+                    idxDependsOn = source.IndexOf(row);
+                    ParseLibsIntoList(row, s1, alreadyLinked);
                 }
+                else if (row.Contains(s2))
+                    ParseLibsIntoList(row, s2, alreadyLinked);
 
-                source[(int)idxOptionalDependsOn] += " " + dir.Name;
-                Console.WriteLine("modifying file: " + target);
-                Console.WriteLine(source[(int)idxOptionalDependsOn]);
+            var neu = string.Empty;
+            foreach (var dir in libs)
+                if (!alreadyLinked.Contains(dir.Name.ToLower()))
+                    neu += " " + dir.Name;
+
+            if (!string.IsNullOrWhiteSpace(neu))
+            {
+                if (idxDependsOn == null)
+                {
+                    neu = s1 + neu;
+                    source.Insert(0, neu);
+                    idxDependsOn = 0;
+                }
+                else
+                    source[(int)idxDependsOn] += neu;
+                Console.WriteLine("modified line in " + target + " :");
+                Console.WriteLine(source[(int)idxDependsOn]);
+
+                //throw exception if no write access = abort
                 File.WriteAllLines(target, source);
             }
 
         }
-        try
+        else
+        {
+            Console.Write("Couldn't find addon manifest: " + manifest + Environment.NewLine + "Delete libs anyway (Y/N): ");
+            var key = Console.ReadKey().KeyChar;
+            var answer = Convert.ToString(key).ToUpper();
+            if (!"Y".Equals(answer))
+            {
+                Console.WriteLine("User canceled cleanup of: " + addon.Name);
+                return;
+            }
+        }
+
+        foreach (var dir in libs)
         {
             dir.Delete(true);
             Console.WriteLine("deleted: " + dir.FullName);
         }
-        catch (Exception ex)
-        {
-            Console.Write(ex.Message + " # " + dir.FullName);
-        }
     }
 
-    static List<DirectoryInfo> Collect()
+    private static void ParseLibsIntoList(string row, string key, HashSet<string> alreadyLinked)
     {
-        var dir = GetAddonPath();
-        Console.WriteLine("searching in " + dir.FullName);
+        foreach (var e in row.Split(new[] { key, ">=", ",", " ", "  " }, StringSplitOptions.RemoveEmptyEntries))
+            alreadyLinked.Add(e.ToLower());
+    }
 
-        var addons = dir.GetDirectories().Select(e => e.Name).ToList();
+    static Dictionary<DirectoryInfo, List<DirectoryInfo>> Collect()
+    {
+        var root = GetAddonPath();
+        Console.WriteLine("searching in " + root.FullName);
 
-        var result = new List<DirectoryInfo>();
-        foreach (var addon in dir.GetDirectories())
-            foreach (var libFolder in addon.GetDirectories("libs"))
-                foreach (var lib in libFolder.GetDirectories())
-                    if (addons.Contains(lib.Name))
-                        result.Add(lib);
+        var addons = root.GetDirectories().Select(e => e.Name.ToLower()).ToList();
+
+        var result = new Dictionary<DirectoryInfo, List<DirectoryInfo>>();
+        foreach (var addon in root.GetDirectories())
+            foreach (var libFolderNames in new[] { "libs", "lib" })
+                foreach (var libFolder in addon.GetDirectories(libFolderNames))
+                    foreach (var lib in libFolder.GetDirectories())
+                        if (addons.Contains(lib.Name.ToLower()))
+                        {
+                            if (result.ContainsKey(addon))
+                                result[addon].Add(lib);
+                            else
+                                result[addon] = new List<DirectoryInfo> { lib };
+                        }
+                        else
+                        {
+                            if (result.ContainsKey(root))
+                                result[root].Add(lib);
+                            else
+                                result[root] = new List<DirectoryInfo> { lib };
+                        }
 
         return result;
     }
+
+
+    static DirectoryInfo _GetAddonPath;
     public static DirectoryInfo GetAddonPath()
     {
-        var addons = "AddOns".ToLower();
-        var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
-        //var dir = new DirectoryInfo(@"C:\Users\Test\Documents\Elder Scrolls Online\live\AddOns\DeleteRedundantLibs");
-        try
+        if (_GetAddonPath == null)
         {
-            if (dir.Name.ToLower().Equals(addons))
-                return dir;
-
-            while (dir.Parent != null)
+            var addons = "AddOns".ToLower();
+            var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+            //var dir = new DirectoryInfo(@"C:\Users\Test\Documents\Elder Scrolls Online\live\AddOns\DeleteRedundantLibs");
+            try
             {
-                dir = dir.Parent;
                 if (dir.Name.ToLower().Equals(addons))
+                {
+                    _GetAddonPath = dir;
                     return dir;
+                }
+
+                while (dir.Parent != null)
+                {
+                    dir = dir.Parent;
+                    if (dir.Name.ToLower().Equals(addons))
+                    {
+                        _GetAddonPath = dir;
+                        return dir;
+                    }
+                }
+                throw new System.NotSupportedException("code cant reach here usually.");
             }
-            throw new System.NotSupportedException("code cant reach here usually.");
+            catch
+            {
+                throw new Exception("working folder " + dir.FullName + " is not located somewhere in the AddOn folder (live/pts).");
+            }
         }
-        catch
-        {
-            throw new Exception("working folder " + dir.FullName + " is not located somewhere in the AddOn folder (live/pts).");
-        }
+        return _GetAddonPath;
     }
 }
