@@ -44,6 +44,12 @@ public class Program
         }
         folders.Remove(root);
 
+        if (!folders.Any())
+        {
+            Console.Write("didn't find redundant libs.");
+            return;
+        }
+
         Console.WriteLine("Found these redundant libs:");
         foreach (var addon in folders.Keys)
             foreach (var e in folders[addon])
@@ -73,7 +79,6 @@ public class Program
 
     public static void ModifyAddon(DirectoryInfo addon, List<DirectoryInfo> libs)
     {
-        //var root = dir.Parent.Parent;
         var manifest = addon.Name + ".txt";
         var txt = addon.GetFiles(manifest);
 
