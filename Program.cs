@@ -58,7 +58,11 @@ public class Program
         var key = Console.ReadKey().KeyChar;
         var answer = Convert.ToString(key).ToUpper();
         if (!"Y".Equals(answer))
+        {
+            Console.WriteLine();
+            Console.Write("key:" + answer + " pressed.");
             return;
+        }
 
         Console.WriteLine();
         foreach (var e in folders)
